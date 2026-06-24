@@ -1,0 +1,40 @@
+data:
+  data_dir: /scratch/shareddata/dldata/laion400M/img2dataset/laion400m-data
+  image_size: 256
+  batch_size: 64
+  num_workers: 12
+  shuffle_buffer: 8192
+  max_shards: 512
+  augmentation: dvae
+train:
+  output_dir: runs/dvae_256_b16
+  steps: 150000
+  lr: 0.0003
+  weight_decay: 0.01
+  warmup_steps: 5000
+  grad_accum_steps: 1
+  grad_clip: 4.0
+  log_every: 10
+  save_every: 5000
+  mixed_precision: bf16
+  compile: false
+  seed: 1337
+  ema_decay: 0.99
+dvae:
+  image_size: 256
+  hidden_channels: 256
+  channel_multipliers: [1, 2, 4, 8]
+  num_res_blocks: 2
+  codebook_size: 8192
+  code_dim: 8192
+  kl_weight: 6.6
+  kl_weight_start: 0.0
+  kl_weight_end: 6.6
+  kl_anneal_steps: 5000
+  temperature: 0.0625
+  temperature_start: 1.0
+  temperature_end: 0.0625
+  temperature_anneal_steps: 150000
+  logit_laplace_eps: 0.1
+transformer:
+  image_tokens_per_side: 32

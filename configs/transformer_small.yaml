@@ -1,0 +1,36 @@
+data:
+  data_dir: /scratch/shareddata/dldata/laion400M/img2dataset/laion400m-data
+  image_size: 128
+  batch_size: 8
+  num_workers: 8
+  shuffle_buffer: 4096
+  augmentation: transformer
+train:
+  output_dir: runs/transformer
+  steps: 250000
+  lr: 0.0002
+  weight_decay: 0.01
+  warmup_steps: 5000
+  mixed_precision: bf16
+  compile: false
+dvae:
+  image_size: 128
+  hidden_channels: 96
+  channel_multipliers: [1, 2, 4, 4]
+  num_res_blocks: 2
+  codebook_size: 8192
+  code_dim: 8192
+  kl_weight: 0.0001
+  temperature: 0.9
+transformer:
+  text_vocab_size: 49408
+  image_vocab_size: 8192
+  text_seq_len: 128
+  text_lowercase: true
+  bpe_dropout: 0.1
+  image_tokens_per_side: 16
+  dim: 512
+  depth: 12
+  heads: 8
+  mlp_ratio: 4.0
+  dropout: 0.1

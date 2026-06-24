@@ -1,0 +1,24 @@
+data:
+  image_size: 32
+  batch_size: 2
+  num_workers: 0
+train:
+  output_dir: runs/tiny
+  steps: 2
+  mixed_precision: "no"
+dvae:
+  image_size: 32
+  hidden_channels: 16
+  channel_multipliers: [1, 2]
+  num_res_blocks: 1
+  codebook_size: 64
+  code_dim: 64
+transformer:
+  text_vocab_size: 128
+  image_vocab_size: 64
+  text_seq_len: 8
+  image_tokens_per_side: 8
+  dim: 64
+  depth: 2
+  heads: 4
+  dropout: 0.0

@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.uv-cache/
+.venv/
+runs/
+samples/
+wandb/
+*.egg-info/
+*.out
+2102.12092v2.pdf

@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dalle1-reproduction"
+version = "0.1.0"
+description = "A modern PyTorch reproduction of the DALL-E 1 dVAE, autoregressive transformer, and sampler."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "DALL-E 1 Reproduction Contributors" },
+]
+dependencies = [
+  "pillow>=11.2",
+  "pyyaml>=6.0",
+  "safetensors>=0.5",
+  "torch>=2.7",
+  "torchvision>=0.22",
+  "tqdm>=4.0",
+]
+
+[project.optional-dependencies]
+data = [
+  "webdataset>=0.2",
+]
+dev = [
+  "pytest>=8.0",
+]
+logging = [
+  "wandb>=0.19",
+]
+text = [
+  "transformers>=4.50",
+]
+full = [
+  "pytest>=8.0",
+  "transformers>=4.50",
+  "wandb>=0.19",
+  "webdataset>=0.2",
+]
+
+[project.scripts]
+dalle1-generate = "dalle1.generate:main"
+dalle1-train-dvae = "dalle1.train_dvae:main"
+dalle1-train-transformer = "dalle1.train_transformer:main"
+
+[tool.setuptools.packages.find]
+include = ["dalle1*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
