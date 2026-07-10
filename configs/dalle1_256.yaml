@@ -35,7 +35,7 @@ dvae:
   temperature_anneal_steps: 150000
   logit_laplace_eps: 0.1
 transformer:
-  text_vocab_size: 49408
+  text_vocab_size: 50257
   image_vocab_size: 8192
   text_seq_len: 256
   text_lowercase: true

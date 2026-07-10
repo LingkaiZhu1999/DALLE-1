@@ -79,4 +79,20 @@ dalle1-generate \
 
 The small configs are intentionally modest so the pipeline can be verified quickly. For a closer DALL-E 1 scale, increase dVAE codebook size toward 8192, image token grid toward `32 x 32`, text length toward 256, and transformer depth/width substantially.
 
+### CIFAR-10 stage-1 smoke experiment
+
+To verify the dVAE end to end on a familiar small dataset, run:
+
+```bash
+uv run python scripts/cifar10_dvae_experiment.py
+```
+
+This downloads CIFAR-10, trains a compact 32px dVAE for 2,000 steps, and writes
+`model.pt`, `metrics.json`, and `reconstructions.png` under
+`runs/cifar10_dvae`. The reconstruction grid places originals on the first row
+and their deterministic argmax-code reconstructions on the second row. A useful
+smoke-test result has visibly recognizable reconstructions, improving PSNR, and
+more than a handful of active codes. Use `--steps 100 --train-examples 1000` for
+a quick plumbing-only run; see `--help` for all overrides.
+
 `configs/dalle1_256.yaml` is a full-resolution reference config: 256px images, 8192 image codes, 256 text tokens, and a 32x32 image-token grid. It is still smaller than OpenAI's unreleased production transformer, but it preserves the core architecture and training objective.

@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=dalle1-dvae-large-b300
 #SBATCH --partition=gpu-b300-288g-ellis
-#SBATCH --nodes=1
-#SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=b300:4
 #SBATCH --cpus-per-task=64
 #SBATCH --mem=480G

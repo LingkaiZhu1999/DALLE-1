@@ -23,7 +23,7 @@ dvae:
   kl_weight: 0.0001
   temperature: 0.9
 transformer:
-  text_vocab_size: 49408
+  text_vocab_size: 50257
   image_vocab_size: 8192
   text_seq_len: 128
   text_lowercase: true
