@@ -5,6 +5,7 @@ from contextlib import nullcontext
 from pathlib import Path
 
 import torch
+from torch.distributed.elastic.multiprocessing.errors import record
 from torch.nn.parallel import DistributedDataParallel as DDP
 from tqdm import trange
 
@@ -30,6 +31,7 @@ from .utils import (
 )
 
 
+@record
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/transformer_small.yaml")

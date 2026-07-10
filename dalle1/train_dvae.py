@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import time
 from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
 import torch
+from torch.distributed.elastic.multiprocessing.errors import record
 from torch.nn.parallel import DistributedDataParallel as DDP
 from tqdm import trange
 
@@ -28,6 +30,7 @@ from .utils import (
 )
 
 
+@record
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/dvae_small.yaml")
@@ -35,8 +38,10 @@ def main() -> None:
     cfg = load_config(args.config)
     seed_everything(cfg.train.seed)
     rank, world_size, _local_rank, dev = init_distributed()
+    if dev.type == "cuda":
+        torch.backends.cudnn.benchmark = True
     loader = iter(build_webdataset_loader(cfg.data, rank=rank, world_size=world_size))
-    model = DiscreteVAE(cfg.dvae).to(dev)
+    model = DiscreteVAE(cfg.dvae).to(dev, memory_format=torch.channels_last)
     if cfg.train.compile:
         model = torch.compile(model)
     if world_size > 1:
@@ -46,6 +51,8 @@ def main() -> None:
     wandb_run = init_wandb(cfg, job_type="train_dvae") if is_rank_zero(rank) else None
     ema_state: dict[str, torch.Tensor] | None = None
     progress = trange(cfg.train.steps, dynamic_ncols=True, disable=not is_rank_zero(rank))
+    last_log_time = time.perf_counter()
+    last_log_step = 0
     for step in progress:
         lr = cosine_lr(step, base_lr=cfg.train.lr, total_steps=cfg.train.steps, warmup_steps=cfg.train.warmup_steps)
         set_lr(opt, lr)
@@ -64,38 +71,54 @@ def main() -> None:
         )
         active.quantizer.temperature = active.cfg.temperature
         active.quantizer.kl_weight = active.cfg.kl_weight
+        schedule = torch.tensor(
+            [active.cfg.temperature, active.cfg.kl_weight],
+            device=dev,
+            dtype=torch.float32,
+        )
         opt.zero_grad(set_to_none=True)
         accum = cfg.train.grad_accum_steps
-        metric_sums = {"loss": 0.0, "recon_loss": 0.0, "kl_loss": 0.0}
+        should_log = step % cfg.train.log_every == 0
+        metric_sums = torch.zeros(3, device=dev) if should_log else None
         for micro_step in range(accum):
             images, _captions = next(loader)
-            images = images.to(dev, non_blocking=True)
+            images = images.to(dev, non_blocking=True, memory_format=torch.channels_last)
             sync_context = model.no_sync() if world_size > 1 and micro_step < accum - 1 else nullcontext()
             with sync_context:
                 with autocast_context(dev, cfg.train.mixed_precision):
-                    out = model(images)
+                    out = model(images, schedule, False)
                     loss = out["loss"] / accum
                 loss.backward()
-            for key in metric_sums:
-                metric_sums[key] += reduce_mean(out[key]).item() / accum
+            if metric_sums is not None:
+                metric_sums += torch.stack(
+                    [out["loss"].detach(), out["recon_loss"], out["kl_loss"]]
+                ) / accum
         torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.train.grad_clip)
         opt.step()
         if is_rank_zero(rank) and cfg.train.ema_decay < 1.0 and (step + 1) % cfg.train.ema_every == 0:
             ema_state = update_ema_state(ema_state, unwrap_model(model).state_dict(), decay=cfg.train.ema_decay)
-        if is_rank_zero(rank) and step % cfg.train.log_every == 0:
+        if should_log:
+            loss_value, recon_value, kl_value = reduce_mean(metric_sums).tolist()
+            now = time.perf_counter()
+            steps_since_log = step - last_log_step + 1
+            images_per_second = cfg.data.batch_size * world_size * accum * steps_since_log / (now - last_log_time)
+            last_log_time = now
+            last_log_step = step + 1
+        if is_rank_zero(rank) and should_log:
             progress.set_description(
-                f"loss={metric_sums['loss']:.4f} recon={metric_sums['recon_loss']:.4f} kl={metric_sums['kl_loss']:.4f}"
+                f"loss={loss_value:.4f} recon={recon_value:.4f} kl={kl_value:.4f} img/s={images_per_second:.1f}"
             )
             wandb_log(
                 wandb_run,
                 {
-                    "train/loss": metric_sums["loss"],
-                    "train/recon_loss": metric_sums["recon_loss"],
-                    "train/kl_loss": metric_sums["kl_loss"],
+                    "train/loss": loss_value,
+                    "train/recon_loss": recon_value,
+                    "train/kl_loss": kl_value,
                     "train/lr": lr,
                     "train/dvae_temperature": active.cfg.temperature,
                     "train/dvae_kl_weight": active.cfg.kl_weight,
                     "train/global_batch_size": cfg.data.batch_size * world_size * accum,
+                    "train/images_per_second": images_per_second,
                 },
                 step=step,
             )

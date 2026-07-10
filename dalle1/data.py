@@ -103,7 +103,7 @@ def build_webdataset_loader(cfg: DataConfig, *, rank: int = 0, world_size: int =
         )
     transform = image_transform(cfg.image_size, cfg.augmentation)
     dataset = (
-        wds.WebDataset(shards, shardshuffle=False, resampled=True)
+        wds.WebDataset(shards, shardshuffle=False, resampled=True, nodesplitter=None)
         .shuffle(cfg.shuffle_buffer)
         .decode("pil")
         .map(lambda sample: _decode_sample(sample, transform))

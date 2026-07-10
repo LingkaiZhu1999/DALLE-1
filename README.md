@@ -40,15 +40,15 @@ dalle1-train-dvae --config configs/dvae_small.yaml
 
 The dVAE checkpoint contains the encoder, quantizer, and decoder. The large 256px config follows the Appendix A setup: four encoder/decoder groups, bottleneck residual blocks with small residual gain, 8192 categorical codes, 32x32 image-token grids, KL and temperature schedules, AdamW, gradient clipping, and exponentially weighted iterate averaging.
 
-`configs/dvae_h200_256.yaml` uses per-GPU batch size 96 on H200s, matching the large-experiment cluster note in `guideline.md`.
+`configs/dvae_h200_256.yaml` uses per-GPU batch size 64 on H200s.
 
 For distributed 256px dVAE training on 8 H200 GPUs, use:
 
 ```bash
-sbatch scripts/slurm_dvae_h200_256.sh
+sbatch scripts/slurm_dvae_large_256.sh
 ```
 
-That distributed dVAE job trains with global batch size `96 * 8 = 768`.
+That distributed dVAE job trains with global batch size `64 * 8 = 512`.
 
 ## Train The Transformer
 

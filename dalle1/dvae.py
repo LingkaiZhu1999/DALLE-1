@@ -80,7 +80,12 @@ class Decoder(nn.Module):
         self.net = nn.Sequential(*layers)
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:
-        return self.net(z)
+        projection = self.net[0]
+        z = F.linear(z, projection.weight[:, :, 0, 0], projection.bias)
+        z = z.permute(0, 3, 1, 2)
+        for index in range(1, len(self.net)):
+            z = self.net[index](z)
+        return z
 
 
 class GumbelRelaxedQuantizer(nn.Module):
@@ -90,25 +95,31 @@ class GumbelRelaxedQuantizer(nn.Module):
         self.kl_weight = cfg.kl_weight
         self.temperature = cfg.temperature
 
-    def forward(self, logits: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        b, _classes, h, w = logits.shape
-        logits = logits.permute(0, 2, 3, 1).contiguous()
-        probs = F.softmax(logits, dim=-1)
+    def forward(
+        self,
+        logits: torch.Tensor,
+        schedule: torch.Tensor | None = None,
+        *,
+        return_ids: bool = True,
+    ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor]:
+        logits = logits.permute(0, 2, 3, 1)
+        log_probs = F.log_softmax(logits, dim=-1)
+        probs = log_probs.exp()
+        temperature = self.temperature if schedule is None else schedule[0]
+        kl_weight = self.kl_weight if schedule is None else schedule[1]
         if self.training:
-            weights = F.gumbel_softmax(logits, tau=self.temperature, hard=False, dim=-1)
+            weights = F.gumbel_softmax(logits, tau=temperature, hard=False, dim=-1)
         else:
             ids = logits.argmax(dim=-1)
             weights = F.one_hot(ids, self.codebook_size).type_as(logits)
 
-        quant = weights.permute(0, 3, 1, 2).contiguous()
-        ids = probs.argmax(dim=-1)
-        log_probs = F.log_softmax(logits, dim=-1)
+        ids = probs.argmax(dim=-1) if return_ids else None
         kl_per_token = (probs * (log_probs + torch.log(logits.new_tensor(self.codebook_size)))).sum(dim=-1)
-        kl_loss = self.kl_weight * kl_per_token.mean()
-        return quant, ids, kl_loss
+        kl_loss = kl_weight * kl_per_token.mean()
+        return weights, ids, kl_loss
 
     def embed_code(self, ids: torch.Tensor) -> torch.Tensor:
-        return F.one_hot(ids, self.codebook_size).permute(0, 3, 1, 2).float().contiguous()
+        return F.one_hot(ids, self.codebook_size).float()
 
 
 class DiscreteVAE(nn.Module):
@@ -133,20 +144,30 @@ class DiscreteVAE(nn.Module):
     def decode_tokens(self, ids: torch.Tensor) -> torch.Tensor:
         return decode_logit_laplace_mean(self.decoder(self.quantizer.embed_code(ids)))
 
-    def forward(self, images: torch.Tensor) -> dict[str, torch.Tensor]:
+    def forward(
+        self,
+        images: torch.Tensor,
+        schedule: torch.Tensor | None = None,
+        return_details: bool = True,
+    ) -> dict[str, torch.Tensor]:
         logits = self.encoder(images)
-        quant, ids, kl_loss = self.quantizer(logits)
+        quant, ids, kl_loss = self.quantizer(logits, schedule, return_ids=return_details)
         recon_params = self.decoder(quant)
         recon_loss = logit_laplace_nll(recon_params, images, eps=self.cfg.logit_laplace_eps)
-        recon = decode_logit_laplace_mean(recon_params)
-        return {
+        output = {
             "loss": recon_loss + kl_loss,
             "recon_loss": recon_loss.detach(),
             "kl_loss": kl_loss.detach(),
-            "recon": recon,
-            "ids": ids,
-            "logits": logits,
         }
+        if return_details:
+            output.update(
+                {
+                    "recon": decode_logit_laplace_mean(recon_params),
+                    "ids": ids,
+                    "logits": logits,
+                }
+            )
+        return output
 
 
 def logit_laplace_nll(params: torch.Tensor, images: torch.Tensor, *, eps: float) -> torch.Tensor:
