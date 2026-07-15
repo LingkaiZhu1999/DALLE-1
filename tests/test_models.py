@@ -44,6 +44,33 @@ def test_decoder_relaxed_projection_matches_dense_conv():
     torch.testing.assert_close(projected, dense)
 
 
+def test_dvae_kl_matches_image_space_normalization():
+    cfg = DvaeConfig(
+        image_size=32,
+        in_channels=3,
+        hidden_channels=8,
+        channel_multipliers=(1, 2, 4),
+        num_res_blocks=1,
+        codebook_size=32,
+        code_dim=32,
+    )
+    model = DiscreteVAE(cfg).eval()
+    logits = torch.full((2, cfg.codebook_size, 8, 8), -100.0)
+    logits[:, 0] = 100.0
+    beta = 6.6
+
+    _, _, kl_loss = model.quantizer(
+        logits,
+        schedule=torch.tensor([1.0, beta]),
+        return_ids=False,
+    )
+
+    # A deterministic categorical posterior has KL(q || uniform) = ln(K).
+    # The 4x spatial downsampling gives 3 * 4**2 = 48 image values per token.
+    expected = beta * torch.log(torch.tensor(float(cfg.codebook_size))) / 48
+    torch.testing.assert_close(kl_loss, expected)
+
+
 def test_transformer_forward_and_sample():
     cfg = DalleTransformerConfig(
         text_vocab_size=128,

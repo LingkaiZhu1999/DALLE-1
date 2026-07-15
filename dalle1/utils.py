@@ -76,11 +76,21 @@ def autocast_context(device_: torch.device, precision: str):
     return torch.autocast(device_type="cuda", dtype=dtype)
 
 
-def cosine_lr(step: int, *, base_lr: float, total_steps: int, warmup_steps: int) -> float:
+def cosine_lr(
+    step: int,
+    *,
+    base_lr: float,
+    total_steps: int,
+    warmup_steps: int,
+    min_lr: float = 0.0,
+    decay_steps: int | None = None,
+) -> float:
     if step < warmup_steps:
         return base_lr * (step + 1) / max(1, warmup_steps)
-    progress = (step - warmup_steps) / max(1, total_steps - warmup_steps)
-    return base_lr * 0.5 * (1.0 + math.cos(math.pi * min(1.0, progress)))
+    decay_steps = total_steps if decay_steps is None else decay_steps
+    progress = (step - warmup_steps) / max(1, decay_steps - warmup_steps)
+    cosine = 0.5 * (1.0 + math.cos(math.pi * min(1.0, progress)))
+    return min_lr + (base_lr - min_lr) * cosine
 
 
 def set_lr(optimizer: torch.optim.Optimizer, lr: float) -> None:
@@ -96,9 +106,17 @@ def save_checkpoint(path: str | Path, **payload: Any) -> None:
     model = payload.pop("model", None)
     if not isinstance(model, dict) or not all(isinstance(v, torch.Tensor) for v in model.values()):
         raise TypeError("save_checkpoint expects a tensor state_dict under the 'model' key")
-    save_safetensors(model, tensor_path)
-    with meta_path.open("w", encoding="utf-8") as handle:
-        json.dump(_jsonable(payload), handle, indent=2, sort_keys=True)
+    tensor_tmp = tensor_path.with_name(f".{tensor_path.name}.{os.getpid()}.tmp")
+    meta_tmp = meta_path.with_name(f".{meta_path.name}.{os.getpid()}.tmp")
+    try:
+        save_safetensors(model, tensor_tmp)
+        with meta_tmp.open("w", encoding="utf-8") as handle:
+            json.dump(_jsonable(payload), handle, indent=2, sort_keys=True)
+        os.replace(tensor_tmp, tensor_path)
+        os.replace(meta_tmp, meta_path)
+    finally:
+        tensor_tmp.unlink(missing_ok=True)
+        meta_tmp.unlink(missing_ok=True)
 
 
 def load_checkpoint(path: str | Path, map_location: str | torch.device = "cpu") -> dict[str, Any]:
@@ -125,7 +143,9 @@ def _checkpoint_paths(path: Path) -> tuple[Path, Path]:
 
 def _move_to_cpu(value: Any) -> Any:
     if isinstance(value, torch.Tensor):
-        return value.detach().cpu()
+        # safetensors requires dense, C-contiguous tensors. In particular,
+        # channels-last convolution weights remain non-contiguous after cpu().
+        return value.detach().cpu().contiguous()
     if isinstance(value, dict):
         return {key: _move_to_cpu(item) for key, item in value.items()}
     if isinstance(value, list):

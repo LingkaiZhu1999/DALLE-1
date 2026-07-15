@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import time
 from contextlib import nullcontext
 from pathlib import Path
@@ -42,11 +43,22 @@ def main() -> None:
         torch.backends.cudnn.benchmark = True
     loader = iter(build_webdataset_loader(cfg.data, rank=rank, world_size=world_size))
     model = DiscreteVAE(cfg.dvae).to(dev, memory_format=torch.channels_last)
+    for parameter in model.parameters():
+        if parameter.ndim == 4 and parameter.is_contiguous(memory_format=torch.channels_last):
+            parameter.register_hook(
+                lambda grad: grad.contiguous(memory_format=torch.channels_last)
+            )
     if cfg.train.compile:
         model = torch.compile(model)
     if world_size > 1:
         model = DDP(model, device_ids=[dev.index])
-    opt = torch.optim.AdamW(model.parameters(), lr=cfg.train.lr, weight_decay=cfg.train.weight_decay)
+    opt = torch.optim.AdamW(
+        model.parameters(),
+        lr=cfg.train.lr,
+        betas=(cfg.train.adam_beta1, cfg.train.adam_beta2),
+        eps=cfg.train.adam_eps,
+        weight_decay=cfg.train.weight_decay,
+    )
     out_dir = Path(cfg.train.output_dir)
     wandb_run = init_wandb(cfg, job_type="train_dvae") if is_rank_zero(rank) else None
     ema_state: dict[str, torch.Tensor] | None = None
@@ -54,16 +66,23 @@ def main() -> None:
     last_log_time = time.perf_counter()
     last_log_step = 0
     for step in progress:
-        lr = cosine_lr(step, base_lr=cfg.train.lr, total_steps=cfg.train.steps, warmup_steps=cfg.train.warmup_steps)
+        lr = cosine_lr(
+            step,
+            base_lr=cfg.train.lr,
+            min_lr=cfg.train.min_lr,
+            total_steps=cfg.train.steps,
+            decay_steps=cfg.train.lr_decay_steps,
+            warmup_steps=cfg.train.warmup_steps,
+        )
         set_lr(opt, lr)
         active = unwrap_model(model)
-        active.cfg.temperature = linear_anneal(
+        active.cfg.temperature = cosine_anneal(
             step,
             start=cfg.dvae.temperature_start,
             end=cfg.dvae.temperature_end,
             steps=cfg.dvae.temperature_anneal_steps,
         )
-        active.cfg.kl_weight = linear_anneal(
+        active.cfg.kl_weight = cosine_anneal(
             step,
             start=cfg.dvae.kl_weight_start,
             end=cfg.dvae.kl_weight_end,
@@ -93,7 +112,8 @@ def main() -> None:
                 metric_sums += torch.stack(
                     [out["loss"].detach(), out["recon_loss"], out["kl_loss"]]
                 ) / accum
-        torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.train.grad_clip)
+        if cfg.train.grad_clip is not None:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.train.grad_clip)
         opt.step()
         if is_rank_zero(rank) and cfg.train.ema_decay < 1.0 and (step + 1) % cfg.train.ema_every == 0:
             ema_state = update_ema_state(ema_state, unwrap_model(model).state_dict(), decay=cfg.train.ema_decay)
@@ -145,6 +165,14 @@ def linear_anneal(step: int, *, start: float, end: float, steps: int) -> float:
     if steps <= 0:
         return end
     alpha = min(1.0, step / steps)
+    return start + alpha * (end - start)
+
+
+def cosine_anneal(step: int, *, start: float, end: float, steps: int) -> float:
+    if steps <= 0:
+        return end
+    progress = min(1.0, step / steps)
+    alpha = 0.5 * (1.0 - math.cos(math.pi * progress))
     return start + alpha * (end - start)
 
 

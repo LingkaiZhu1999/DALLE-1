@@ -24,10 +24,15 @@ class TrainConfig:
     output_dir: str = "runs/dalle1"
     steps: int = 100_000
     lr: float = 3e-4
+    min_lr: float = 0.0
+    lr_decay_steps: int | None = None
+    adam_beta1: float = 0.9
+    adam_beta2: float = 0.999
+    adam_eps: float = 1e-8
     weight_decay: float = 0.01
     warmup_steps: int = 2_000
     grad_accum_steps: int = 1
-    grad_clip: float = 1.0
+    grad_clip: float | None = 1.0
     log_every: int = 50
     save_every: int = 5_000
     mixed_precision: str = "bf16"

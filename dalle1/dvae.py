@@ -94,6 +94,12 @@ class GumbelRelaxedQuantizer(nn.Module):
         self.codebook_size = cfg.codebook_size
         self.kl_weight = cfg.kl_weight
         self.temperature = cfg.temperature
+        downsample_factor = 2 ** max(0, len(cfg.channel_multipliers) - 1)
+        # Reconstruction NLL is averaged over image channels and pixels, while
+        # KL is averaged over latent tokens. Match the paper's normalization by
+        # dividing KL by (image values / latent tokens). For 256x256 RGB images
+        # with a 32x32 latent grid, this factor is 3 * 8**2 = 192.
+        self.kl_normalization = cfg.in_channels * downsample_factor**2
 
     def forward(
         self,
@@ -115,7 +121,7 @@ class GumbelRelaxedQuantizer(nn.Module):
 
         ids = probs.argmax(dim=-1) if return_ids else None
         kl_per_token = (probs * (log_probs + torch.log(logits.new_tensor(self.codebook_size)))).sum(dim=-1)
-        kl_loss = kl_weight * kl_per_token.mean()
+        kl_loss = (kl_weight / self.kl_normalization) * kl_per_token.mean()
         return weights, ids, kl_loss
 
     def embed_code(self, ids: torch.Tensor) -> torch.Tensor:

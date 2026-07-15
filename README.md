@@ -38,17 +38,36 @@ pytest
 dalle1-train-dvae --config configs/dvae_small.yaml
 ```
 
-The dVAE checkpoint contains the encoder, quantizer, and decoder. The large 256px config follows the Appendix A setup: four encoder/decoder groups, bottleneck residual blocks with small residual gain, 8192 categorical codes, 32x32 image-token grids, KL and temperature schedules, AdamW, gradient clipping, and exponentially weighted iterate averaging.
+The dVAE checkpoint contains the encoder, quantizer, and decoder. The large 256px config follows the Appendix A setup: four encoder/decoder groups, bottleneck residual blocks with small residual gain, 8192 categorical codes, 32x32 image-token grids, cosine KL and temperature schedules, AdamW, and exponentially weighted iterate averaging.
 
-`configs/dvae_h200_256.yaml` uses per-GPU batch size 64 on H200s.
+### Paper-aligned dVAE hyperparameters
 
-For distributed 256px dVAE training on 8 H200 GPUs, use:
+`configs/dvae_h200_256.yaml` follows the dVAE training settings reported in [Appendix A.2 of *Zero-Shot Text-to-Image Generation*](https://arxiv.org/pdf/2102.12092). The Slurm job uses four H200 GPUs with a per-GPU batch size of 128, giving the paper's global batch size of `128 * 4 = 512`.
+
+| Hyperparameter | Value |
+| --- | ---: |
+| Optimizer updates | 3,000,000 |
+| Per-GPU batch size | 128 |
+| Global batch size | 512 |
+| Initial learning rate | `1e-4` |
+| Minimum learning rate | `1.25e-6` |
+| Learning-rate decay | Cosine over 1,200,000 updates, then held at the minimum |
+| AdamW betas | `(0.9, 0.999)` |
+| AdamW epsilon | `1e-8` |
+| Weight decay | `1e-4` |
+| Gradient clipping | Disabled (not reported for the paper's dVAE) |
+| EMA decay | `0.999`, updated every optimizer step |
+| KL weight | Cosine from `0` to `6.6` over 5,000 updates |
+| Gumbel-softmax temperature | Cosine from `1` to `1/16` over 150,000 updates |
+| Mixed precision | `bf16` on H200 (the paper used mixed precision on V100) |
+
+For distributed 256px dVAE training on four H200 GPUs, use:
 
 ```bash
-sbatch scripts/slurm_dvae_large_256.sh
+sbatch scripts/slurm_dvae_h200_256.sh
 ```
 
-That distributed dVAE job trains with global batch size `64 * 8 = 512`.
+The local training data is LAION-400M rather than the paper's private dataset of approximately 250 million text-image pairs, so matching these optimization hyperparameters does not make the run an exact data reproduction.
 
 ## Train The Transformer
 
