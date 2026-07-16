@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 
 from dalle1.config import DalleTransformerConfig, DvaeConfig
-from dalle1.dvae import DiscreteVAE
+from dalle1.dvae import DiscreteVAE, map_pixels, unmap_pixels
 from dalle1.transformer import DalleTransformer
 
 
@@ -59,7 +59,7 @@ def test_dvae_kl_matches_image_space_normalization():
     logits[:, 0] = 100.0
     beta = 6.6
 
-    _, _, kl_loss = model.quantizer(
+    _, _, kl_loss, _ = model.quantizer(
         logits,
         schedule=torch.tensor([1.0, beta]),
         return_ids=False,
@@ -69,6 +69,34 @@ def test_dvae_kl_matches_image_space_normalization():
     # The 4x spatial downsampling gives 3 * 4**2 = 48 image values per token.
     expected = beta * torch.log(torch.tensor(float(cfg.codebook_size))) / 48
     torch.testing.assert_close(kl_loss, expected)
+
+
+def test_pixel_mapping_is_affine_and_invertible():
+    images = torch.tensor([-1.0, -0.5, 0.0, 0.5, 1.0])
+    mapped = map_pixels(images, eps=0.1)
+    torch.testing.assert_close(mapped, torch.tensor([0.1, 0.3, 0.5, 0.7, 0.9]))
+    torch.testing.assert_close(unmap_pixels(mapped, eps=0.1), images)
+
+
+def test_dvae_diagnostics_measure_code_usage():
+    cfg = DvaeConfig(
+        image_size=8,
+        in_channels=3,
+        hidden_channels=8,
+        channel_multipliers=(1,),
+        num_res_blocks=1,
+        codebook_size=4,
+        code_dim=4,
+    )
+    model = DiscreteVAE(cfg).eval()
+    logits = torch.full((1, 4, 2, 2), -100.0)
+    logits[:, 0, 0, :] = 100.0
+    logits[:, 1, 1, :] = 100.0
+
+    _, _, _, diagnostics = model.quantizer(logits, return_ids=False, return_diagnostics=True)
+
+    assert diagnostics["token_counts"].tolist() == [2, 2, 0, 0]
+    torch.testing.assert_close(diagnostics["posterior_entropy"], torch.tensor(0.0))
 
 
 def test_transformer_forward_and_sample():

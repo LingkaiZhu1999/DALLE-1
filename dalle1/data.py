@@ -22,8 +22,10 @@ class DalleImageTransform:
         image = image.convert("RGB")
         if self.augmentation == "dvae":
             image = self._random_square_crop(image)
-            max_size = max(self.image_size, int(round(9 / 8 * self.image_size)))
-            size = random.randint(self.image_size, max_size)
+            source_size = image.width
+            min_size = max(self.image_size, min(source_size, int(round(9 / 8 * self.image_size))))
+            max_size = max(min_size, min(source_size, int(round(12 / 8 * self.image_size))))
+            size = random.randint(min_size, max_size)
             image = image.resize((size, size), Image.Resampling.BOX)
             image = self._random_crop(image, self.image_size)
             if random.random() < 0.5:

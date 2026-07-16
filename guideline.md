@@ -26,6 +26,8 @@ None
 None
 
 # Completed
+- Re-audited the dVAE against Appendix A and OpenAI's released encoder/decoder: corrected the affine pixel map and inverse map, restored the encoder-head ReLU, kept the categorical-logit and decoder code projection paths in float32, matched convolution initialization, and corrected the dVAE resize augmentation range. Added posterior entropy/perplexity, unweighted KL, hard-code usage/perplexity, top-code share, and encoder-logit diagnostics. The KL ceiling alone is not treated as codebook collapse.
+- Investigated the throughput regression from `slurm-19171524.out` to `slurm-19184874.out`: steady-state throughput fell from about 607 to 221 images/s. The newer run added channels-last gradient hooks that copy every convolution gradient during backpropagation without eliminating the DDP stride warning; removed those hooks while retaining channels-last model/input layout.
 - Added distributed H200 transformer training with a global batch size of 1024 via `scripts/slurm_transformer_h200_256.sh` and `configs/transformer_h200_256.yaml`.
 - Added distributed H200 dVAE training via `scripts/slurm_dvae_h200_256.sh`.
 - Audited the DALL-E paper and `./dalle1`; fixed distributed dVAE codebook synchronization, reduced quantizer memory use, and adjusted the H200 dVAE run to avoid the observed batch-16 OOM.
